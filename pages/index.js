@@ -227,6 +227,497 @@ const DEMO_DIARY = {
         ],
     "demo-s3": [],
 };
+
+export default function Home() {
+    const [status, setStatus] = useState("loading"); // loading | signed-out | not-authorized | ready
+    const [errorMessage, setErrorMessage] = useState("");
+    const [teacherRow, setTeacherRow] = useState(null);
+    const [isAdmin, setIsAdmin] = useState(false);
+    const handledUserId = useRef(null);
+    const [demo, setDemo] = useState(false);
+    const demoRef = useRef(false);
+
+    const [view, setView] = useState("home"); // home | child
+    const [activeStudent, setActiveStudent] = useState(null);
+
+    const [myStudents, setMyStudents] = useState([]);
+    const [allStudents, setAllStudents] = useState([]);
+    const [teachers, setTeachers] = useState([]);
+    const [tasks, setTasks] = useState([]);
+
+    // Verbindingenkaart (gedeeld, één keer geladen)
+    const [skills, setSkills] = useState(null);
+    const [foundations, setFoundations] = useState(null);
+
+    // Gegevens van het geopende kind
+    const [childScores, setChildScores] = useState({});
+    const [childDiary, setChildDiary] = useState([]);
+    const [childBaselines, setChildBaselines] = useState([]);
+
+    // Kalender
+    const [selectedDay, setSelectedDay] = useState(null);
+    const [newTaskTitle, setNewTaskTitle] = useState("");
+    const [newTaskTime, setNewTaskTime] = useState("10:00");
+    const [newTaskEnd, setNewTaskEnd] = useState("11:00");
+    const [newTaskCategory, setNewTaskCategory] = useState("Les geven");
+    const [newTaskStudent, setNewTaskStudent] = useState("");
+    const [newTaskTeacher, setNewTaskTeacher] = useState("");
+    const [calFilter, setCalFilter] = useState("all");
+
+    // Admin
+    const [adminTab, setAdminTab] = useState("students");
+    const [expandedTeacherId, setExpandedTeacherId] = useState(null);
+    const [newName, setNewName] = useState("");
+    const [newCode, setNewCode] = useState("");
+    const [newLocation, setNewLocation] = useState("Lychee hub");
+    const [newStageMath, setNewStageMath] = useState("");
+    const [newStageLiteracy, setNewStageLiteracy] = useState("");
+    const [newTeacherId, setNewTeacherId] = useState("");
+
+    useEffect(() => {
+          const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+                  if (session) {
+                            handleSignedIn(session);
+                  } else {
+                            handledUserId.current = null;
+                            if (!demoRef.current) setStatus("signed-out");
+                  }
+          });
+          return () => listener.subscription.unsubscribe();
+    }, []);
+
+    async function handleSignedIn(session) {
+          const user = session.user;
+          if (handledUserId.current === user.id) return;
+          handledUserId.current = user.id;
+
+          // Gastenlijst-check: alleen goedgekeurde e-mailadressen komen binnen.
+          const { data: allowedRow, error: allowError } = await supabase
+            .from("allowed_teachers")
+            .select("email")
+            .eq("email", user.email)
+            .maybeSingle();
+
+          if (allowError) {
+                  setErrorMessage(allowError.message);
+                  setStatus("signed-out");
+                  return;
+          }
+          if (!allowedRow) {
+                  await supabase.auth.signOut();
+                  setStatus("not-authorized");
+                  return;
+          }
+
+          const name =
+                  user.user_metadata?.full_name || user.user_metadata?.name || user.email;
+
+          const { data: teacher, error: upsertError } = await supabase
+            .from("teachers")
+            .upsert(
+              { auth_user_id: user.id, name, email: user.email },
+              { onConflict: "auth_user_id" }
+                    )
+            .select()
+            .single();
+
+          if (upsertError) {
+                  setErrorMessage(upsertError.message);
+                  setStatus("signed-out");
+                  return;
+          }
+          setTeacherRow(teacher);
+
+          const { data: adminRow } = await supabase
+            .from("admins")
+            .select("email")
+            .eq("email", user.email)
+            .maybeSingle();
+          const admin = !!adminRow;
+          setIsAdmin(admin);
+          setNewTaskTeacher(teacher.id);
+
+          await refreshData(teacher, admin);
+          setStatus("ready");
+    }
+
+    // Demo-preview starten: alles lokaal, geen database.
+    function startDemo() {
+          demoRef.current = true;
+          setDemo(true);
+          setErrorMessage("");
+          setTeacherRow(DEMO_TEACHER);
+          setIsAdmin(false);
+          setMyStudents(DEMO_STUDENTS);
+          setTeachers([{ id: DEMO_TEACHER.id, name: DEMO_TEACHER.name }]);
+          setSkills(DEMO_SKILLS);
+          setFoundations(DEMO_FOUNDATIONS);
+          setNewTaskTeacher(DEMO_TEACHER.id);
+          const now = new Date();
+          const y = now.getFullYear();
+          const m = now.getMonth();
+          setTasks([
+            { id: "demo-task-1", teacher_id: DEMO_TEACHER.id, title: "Math session", due_date: monthDateStr(y, m, 4), task_time: "10:00", end_time: "11:00", category: "Les geven", student_code: "LL.101", done: true },
+            { id: "demo-task-2", teacher_id: DEMO_TEACHER.id, title: "Reading", due_date: monthDateStr(y, m, 11), task_time: "13:30", end_time: "14:30", category: "Les geven", student_code: "LL.102", done: false },
+            { id: "demo-task-3", teacher_id: DEMO_TEACHER.id, title: "Parent talk — Sofie", due_date: monthDateStr(y, m, 18), task_time: "15:00", end_time: "15:45", category: "Overig", student_code: null, done: false },
+            { id: "demo-task-4", teacher_id: DEMO_TEACHER.id, title: "Prepare math lesson", due_date: monthDateStr(y, m, now.getDate()), task_time: "09:00", end_time: "09:45", category: "Les voorbereiden", student_code: "LL.101", done: false },
+            { id: "demo-task-5", teacher_id: DEMO_TEACHER.id, title: "Math session", due_date: monthDateStr(y, m, now.getDate()), task_time: "10:00", end_time: "11:00", category: "Les geven", student_code: "LL.101", done: false },
+            { id: "demo-task-6", teacher_id: DEMO_TEACHER.id, title: "Team meeting", due_date: monthDateStr(y, m, now.getDate()), task_time: "10:30", end_time: "11:30", category: "Interne meeting", student_code: null, done: false },
+                ]);
+          setStatus("ready");
+    }
+
+    async function refreshData(teacher, admin) {
+          if (demo) return;
+          const t = teacher || teacherRow;
+          const a = admin ?? isAdmin;
+          if (!t) return;
+
+          const { data: mine } = await supabase
+            .from("students")
+            .select("id, name, code, location, stage_math, stage_literacy, teacher_id, archived")
+            .eq("teacher_id", t.id)
+            .eq("archived", false)
+            .order("name");
+          setMyStudents(mine || []);
+
+          const { data: taskRows } = await supabase
+            .from("teacher_tasks")
+            .select("id, teacher_id, title, due_date, task_time, end_time, category, student_code, done")
+            .order("due_date");
+          setTasks(taskRows || []);
+
+          const { data: teacherRows } = await supabase
+            .from("teachers")
+            .select("id, name")
+            .order("name");
+          setTeachers(teacherRows || []);
+
+          if (a) {
+                  const { data: everyone } = await supabase
+                    .from("students")
+                    .select("id, name, code, location, stage_math, stage_literacy, teacher_id, archived")
+                    .order("name");
+                  setAllStudents(everyone || []);
+          }
+    }
+
+    async function ensureMapLoaded() {
+          if (skills || demo) return;
+          const { data: skillRows, error: skillError } = await supabase
+            .from("skills")
+            .select("id, name, subject, domain, stage")
+            .limit(5000);
+          if (skillError) {
+                  setErrorMessage(skillError.message);
+                  return;
+          }
+          const { data: foundationRows, error: foundationError } = await supabase
+            .from("foundations")
+            .select("skill_id, foundation_skill_id")
+            .limit(10000);
+          if (foundationError) {
+                  setErrorMessage(foundationError.message);
+                  return;
+          }
+          setSkills(skillRows || []);
+          setFoundations(foundationRows || []);
+    }
+
+    async function openChild(student) {
+          setErrorMessage("");
+          setActiveStudent(student);
+          setView("child");
+          setChildScores({});
+          setChildDiary([]);
+          setChildBaselines([]);
+          if (typeof window !== "undefined") window.scrollTo(0, 0);
+
+          if (demo) {
+                  setChildScores({ ...(DEMO_SCORES[student.id] || {}) });
+                  setChildDiary([...(DEMO_DIARY[student.id] || [])]);
+                  setChildBaselines([]);
+                  return;
+          }
+
+          await ensureMapLoaded();
+
+          const { data: scoreRows, error: scoreError } = await supabase
+            .from("scores")
+            .select("skill_id, score, date, created_at")
+            .eq("student_id", student.id)
+            .order("date", { ascending: true })
+            .order("created_at", { ascending: true })
+            .limit(10000);
+          if (scoreError) {
+                  setErrorMessage(scoreError.message);
+                  return;
+          }
+          const latest = {};
+          (scoreRows || []).forEach((row) => {
+                  latest[row.skill_id] = row.score;
+          });
+          setChildScores(latest);
+
+          const { data: diaryRows, error: diaryError } = await supabase
+            .from("diary_entries")
+            .select("id, entry_date, text, created_at")
+            .eq("student_id", student.id)
+            .order("entry_date", { ascending: false })
+            .order("created_at", { ascending: false });
+          if (diaryError) {
+                  setErrorMessage(diaryError.message);
+                  return;
+          }
+          setChildDiary(diaryRows || []);
+
+          const { data: baselineRows } = await supabase
+            .from("student_baselines")
+            .select("skill_id")
+            .eq("student_id", student.id);
+          setChildBaselines((baselineRows || []).map((r) => r.skill_id));
+    }
+
+    // Intake: startpunt per domein instellen. Alles vóór het gekozen punt telt
+    // als aanwezig verondersteld; het punt zelf wordt de "New skill".
+    async function saveBaseline(domainSkillIds, skillId) {
+          if (!activeStudent) return;
+          if (demo) {
+                  setChildBaselines([
+                            ...childBaselines.filter((id) => !domainSkillIds.includes(id)),
+                            ...(skillId ? [skillId] : []),
+                          ]);
+                  return;
+          }
+          const { error: delError } = await supabase
+            .from("student_baselines")
+            .delete()
+            .eq("student_id", activeStudent.id)
+            .in("skill_id", domainSkillIds);
+          if (delError) {
+                  setErrorMessage(delError.message);
+                  return;
+          }
+          if (skillId) {
+                  const { error } = await supabase.from("student_baselines").insert({
+                            student_id: activeStudent.id,
+                            skill_id: skillId,
+                  });
+                  if (error) {
+                            setErrorMessage(error.message);
+                            return;
+                  }
+          }
+          setChildBaselines([
+                  ...childBaselines.filter((id) => !domainSkillIds.includes(id)),
+                  ...(skillId ? [skillId] : []),
+                ]);
+    }
+
+    // Cijfer opslaan = nieuwe logboekregel in scores.
+    async function saveGrade(skillId, value) {
+          if (!activeStudent) return;
+          const grade = value === "" ? null : Math.max(1, Math.min(10, Number(value)));
+          if (grade == null || Number.isNaN(grade)) return;
+          if (childScores[skillId] === grade) return;
+
+          if (demo) {
+                  setChildScores({ ...childScores, [skillId]: grade });
+                  return;
+          }
+
+          const { error } = await supabase.from("scores").insert({
+                  student_id: activeStudent.id,
+                  skill_id: skillId,
+                  score: grade,
+                  date: todayStr(),
+          });
+          if (error) {
+                  setErrorMessage(error.message);
+                  return;
+          }
+          setChildScores({ ...childScores, [skillId]: grade });
+    }
+
+    async function addDiaryEntry(date, text) {
+          if (!activeStudent || !text.trim()) return;
+          if (demo) {
+                  const entry = {
+                            id: "demo-d-" + Date.now(),
+                            entry_date: date || todayStr(),
+                            text: text.trim(),
+                            created_at: new Date().toISOString(),
+                  };
+                  setChildDiary([entry, ...childDiary]);
+                  return;
+          }
+          const { data, error } = await supabase
+            .from("diary_entries")
+            .insert({
+                      student_id: activeStudent.id,
+                      teacher_id: teacherRow?.id || null,
+                      entry_date: date || todayStr(),
+                      text: text.trim(),
+            })
+            .select()
+            .single();
+          if (error) {
+                  setErrorMessage(error.message);
+                  return;
+          }
+          setChildDiary([data, ...childDiary]);
+    }
+
+    function downloadDiary(semester) {
+          if (!activeStudent) return;
+          const year = new Date().getFullYear();
+          const entries = childDiary
+            .filter((e) => {
+                      const month = Number(e.entry_date.slice(5, 7));
+                      const inSemester = semester === "S1" ? month <= 6 : month >= 7;
+                      return inSemester && e.entry_date.slice(0, 4) === String(year);
+            })
+            .sort((a, b) => a.entry_date.localeCompare(b.entry_date));
+
+          const lines = [
+                  `Diary — ${activeStudent.name}`,
+                  `${semester === "S1" ? "Semester 1 (Jan–Jun)" : "Semester 2 (Jul–Dec)"} · ${year}`,
+                  `Teacher: ${teacherNameFor(activeStudent.teacher_id) || "Unassigned"}`,
+                  "",
+                  ...(entries.length === 0
+                              ? ["No diary entries in this semester."]
+                              : entries.flatMap((e) => [`— ${e.entry_date} —`, e.text, ""])),
+                ];
+          const blob = new Blob([lines.join("\n")], { type: "text/plain;charset=utf-8" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `diary-${activeStudent.name.toLowerCase().replace(/\s+/g, "-")}-${semester}-${year}.txt`;
+          a.click();
+          URL.revokeObjectURL(url);
+    }
+
+    // ---- Kalender ----
+    async function addTask(event, forTeacherId) {
+          event.preventDefault();
+          if (!newTaskTitle.trim() || !selectedDay) return;
+          if (demo) {
+                  setTasks([
+                            ...tasks,
+                    {
+                                id: "demo-task-" + Date.now(),
+                                teacher_id: forTeacherId,
+                                title: newTaskTitle.trim(),
+                                due_date: selectedDay,
+                                task_time: newTaskTime || null,
+                                end_time: newTaskEnd || null,
+                                category: newTaskCategory,
+                                student_code: newTaskStudent.trim() || null,
+                                done: false,
+                    },
+                          ]);
+                  setNewTaskTitle("");
+                  setNewTaskStudent("");
+                  return;
+          }
+          const { data, error } = await supabase
+            .from("teacher_tasks")
+            .insert({
+                      teacher_id: forTeacherId,
+                      title: newTaskTitle.trim(),
+                      due_date: selectedDay,
+                      task_time: newTaskTime || null,
+                      end_time: newTaskEnd || null,
+                      category: newTaskCategory,
+                      student_code: newTaskStudent.trim() || null,
+            })
+            .select()
+            .single();
+          if (error) {
+                  setErrorMessage(error.message);
+                  return;
+          }
+          setTasks([...tasks, data]);
+          setNewTaskTitle("");
+          setNewTaskStudent("");
+    }
+
+    async function toggleTask(task) {
+          if (demo) {
+                  setTasks(tasks.map((t) => (t.id === task.id ? { ...t, done: !t.done } : t)));
+                  return;
+          }
+          const { error } = await supabase
+            .from("teacher_tasks")
+            .update({ done: !task.done })
+            .eq("id", task.id);
+          if (error) {
+                  setErrorMessage(error.message);
+                  return;
+          }
+          setTasks(tasks.map((t) => (t.id === task.id ? { ...t, done: !t.done } : t)));
+    }
+
+    async function removeTask(task) {
+          if (demo) {
+                  setTasks(tasks.filter((t) => t.id !== task.id));
+                  return;
+          }
+          const { error } = await supabase.from("teacher_tasks").delete().eq("id", task.id);
+          if (error) {
+                  setErrorMessage(error.message);
+                  return;
+          }
+          setTasks(tasks.filter((t) => t.id !== task.id));
+    }
+
+    // ---- Admin ----
+    async function assignTeacher(studentId, teacherId) {
+          const { error } = await supabase
+            .from("students")
+            .update({ teacher_id: teacherId || null })
+            .eq("id", studentId);
+          if (error) {
+                  setErrorMessage(error.message);
+                  return;
+          }
+          await refreshData();
+    }
+
+    async function setArchived(studentId, archived) {
+          const { error } = await supabase
+            .from("students")
+            .update({ archived })
+            .eq("id", studentId);
+          if (error) {
+                  setErrorMessage(error.message);
+                  return;
+          }
+          await refreshData();
+    }
+
+    async function addStudent(event) {
+          event.preventDefault();
+          if (!newName.trim()) return;
+          const { error } = await supabase.from("students").insert({
+                  name: newName.trim(),
+                  code: newCode.trim() || null,
+                  location: newLocation,
+                  stage_math: newStageMath.trim() || null,
+                  stage_literacy: newStageLiteracy.trim() || null,
+                  teacher_id: newTeacherId || null,
+          });
+          if (error) {
+                  setErrorMessage(error.message);
+                  return;
+          }
+          setNewName("");
+          setNewCode("");
+          setNewStageMath("");
+          setNewStageLiteracy("");
+          setNewTeacherId("");
+          await refreshData();
+    }
   // ---- Hulpjes ----
   function teacherNameFor(teacherId) {
         const t = teachers.find((x) => x.id === teacherId);
