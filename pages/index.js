@@ -57,6 +57,21 @@ const houseStyle = `
   .view-switch button{font-family:var(--sans);font-size:13px;font-weight:500;padding:9px 18px;border:none;cursor:pointer;background:var(--card-white);color:var(--muted);}
   .view-switch button.active-teacher{background:var(--teacher-soft);color:var(--ink);}
   .view-switch button.active-admin{background:var(--admin-soft);color:var(--ink);}
+  .dc-nav{background:var(--card-white);border:1px solid var(--rule);border-radius:6px;width:30px;height:30px;cursor:pointer;font-size:14px;color:var(--muted);}
+  .dc-nav:hover{color:var(--ink);}
+  .dc-student-head{display:flex;align-items:center;gap:12px;padding:16px 22px;cursor:pointer;border-radius:14px;}
+  .dc-student-head:hover{background:rgba(255,255,255,.35);}
+  .tag.dc-done{background:var(--teacher-soft);color:var(--teacher);}
+  .dc-subject{background:var(--card-white);border:1px solid var(--rule);border-radius:8px;margin-bottom:12px;}
+  .dc-subject-head{padding:11px 14px;cursor:pointer;font-weight:500;font-size:14px;}
+  .dc-subject-head:hover{background:var(--card);border-radius:8px;}
+  .dc-sugg{position:absolute;left:0;right:0;top:100%;background:var(--card-white);border:1px solid var(--rule);border-radius:6px;box-shadow:0 6px 18px rgba(44,42,38,.12);z-index:5;max-height:180px;overflow:auto;}
+  .dc-sugg div{padding:7px 10px;font-size:13px;cursor:pointer;}
+  .dc-sugg div:hover{background:var(--teacher-soft);}
+  .dc-sugg-code{font-family:var(--mono);font-size:12px;color:var(--teacher);margin-right:8px;}
+  .dc-chip{font-family:var(--mono);font-size:12px;background:var(--teacher-soft);color:var(--ink);border:1px solid var(--rule);border-radius:6px;padding:3px 8px;display:inline-flex;align-items:center;gap:6px;}
+  .dc-chip b{color:var(--teacher);font-weight:500;}
+  .dc-chip span{cursor:pointer;color:var(--faint);}
   .cal{background:var(--card-white);border:1px solid var(--rule);border-radius:10px;overflow:hidden;}
   .cal-head{display:grid;grid-template-columns:repeat(7,1fr);background:var(--card);}
   .cal-head div{padding:8px 10px;font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--faint);text-align:right;}
@@ -113,6 +128,37 @@ function todayStr() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+
+function shiftDateStr(dateStr, days) {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function prettyDate(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  const names = [
+    "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+  ];
+  const months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  const prefix = dateStr === todayStr() ? "Today · " : "";
+  return `${prefix}${names[d.getDay()]} ${d.getDate()} ${months[d.getMonth()]}`;
+}
+
+const DC_SUBJECTS = [
+  { key: "Math", color: "#C2663C" },
+  { key: "Literacy", color: "#6E8E5B" },
+  { key: "Science", color: "#5E7E9B" },
+  { key: "Project", color: "#D66BA0" },
+];
+const DC_QUESTIONS = [
+  { key: "well", label: "What went well?" },
+  { key: "better", label: "What could be better?" },
+  { key: "tomorrow", label: "What do we focus on tomorrow?" },
+];
 
 function currentMonthInfo() {
   const now = new Date();
@@ -416,6 +462,12 @@ export default function Home() {
   const [newTaskTeacher, setNewTaskTeacher] = useState("");
   const [calFilter, setCalFilter] = useState("all");
 
+  // Day closers (03)
+  const [dcDate, setDcDate] = useState(todayStr());
+  const [dayClosers, setDayClosers] = useState({}); // student_id -> data object
+  const [dcOpenStudent, setDcOpenStudent] = useState(null);
+  const [dcSaved, setDcSaved] = useState({}); // student_id -> true when saved for dcDate
+
   // Admin
   const [adminTab, setAdminTab] = useState("students");
   const [expandedTeacherId, setExpandedTeacherId] = useState(null);
@@ -596,11 +648,12 @@ export default function Home() {
       .eq("archived", false)
       .order("name");
     setMyStudents(mine || []);
+    loadDayClosers(dcDate, mine || []);
 
     const { data: taskRows } = await supabase
       .from("teacher_tasks")
       .select(
-        "id, teacher_id, title, due_date, task_time, end_time, category, student_code, done",
+        "id, teacher_id, title, due_date, task_time, end_time, category, student_code, done, notes",
       )
       .order("due_date");
     setTasks(taskRows || []);
@@ -789,6 +842,68 @@ export default function Home() {
     setChildDiary([data, ...childDiary]);
   }
 
+  // ---- Day closers (03) ----
+  async function loadDayClosers(date, studentList) {
+    if (demo) return;
+    const list = studentList || myStudents;
+    if (!list.length) return;
+    const { data: rows, error } = await supabase
+      .from("day_closers")
+      .select("student_id, entry_date, data")
+      .eq("entry_date", date)
+      .in(
+        "student_id",
+        list.map((s) => s.id),
+      );
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+    const byStudent = {};
+    const savedMap = {};
+    (rows || []).forEach((r) => {
+      byStudent[r.student_id] = r.data || {};
+      savedMap[r.student_id] = true;
+    });
+    setDayClosers(byStudent);
+    setDcSaved(savedMap);
+  }
+
+  function updateDayCloser(studentId, updater) {
+    setDayClosers((prev) => {
+      const current = prev[studentId] || {};
+      return { ...prev, [studentId]: updater(current) };
+    });
+    setDcSaved((prev) => ({ ...prev, [studentId]: false }));
+  }
+
+  async function saveDayCloser(studentId) {
+    if (demo) return;
+    const data = dayClosers[studentId] || {};
+    const { error } = await supabase.from("day_closers").upsert(
+      {
+        student_id: studentId,
+        teacher_id: teacherRow?.id || null,
+        entry_date: dcDate,
+        data,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "student_id,entry_date" },
+    );
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
+    setDcSaved((prev) => ({ ...prev, [studentId]: true }));
+  }
+
+  function changeDcDate(next) {
+    setDcDate(next);
+    setDayClosers({});
+    setDcSaved({});
+    loadDayClosers(next);
+  }
+
   function downloadDiary(semester) {
     if (!activeStudent) return;
     const year = new Date().getFullYear();
@@ -918,6 +1033,28 @@ export default function Home() {
       return;
     }
     setTasks(tasks.filter((t) => t.id !== task.id));
+  }
+
+  async function saveTaskNote(task, notes) {
+    const clean = (notes || "").trim() || null;
+    if (demo) {
+      setTasks(
+        tasks.map((t) => (t.id === task.id ? { ...t, notes: clean } : t)),
+      );
+      return true;
+    }
+    const { error } = await supabase
+      .from("teacher_tasks")
+      .update({ notes: clean })
+      .eq("id", task.id);
+    if (error) {
+      setErrorMessage(error.message);
+      return false;
+    }
+    setTasks(
+      tasks.map((t) => (t.id === task.id ? { ...t, notes: clean } : t)),
+    );
+    return true;
   }
 
   // ---- Admin ----
@@ -1239,6 +1376,7 @@ export default function Home() {
                 dayTasks={dayTasks}
                 onToggle={toggleTask}
                 onRemove={removeTask}
+                onSaveNote={saveTaskNote}
                 showTeacher={false}
                 teacherNameFor={teacherNameFor}
                 teacherColor={teacherColor}
@@ -1310,6 +1448,20 @@ export default function Home() {
                 }
               />
 
+              <DayClosersSection
+                students={myStudents}
+                dcDate={dcDate}
+                changeDcDate={changeDcDate}
+                dayClosers={dayClosers}
+                updateDayCloser={updateDayCloser}
+                saveDayCloser={saveDayCloser}
+                dcOpenStudent={dcOpenStudent}
+                setDcOpenStudent={setDcOpenStudent}
+                dcSaved={dcSaved}
+                skills={skills}
+                ensureMapLoaded={ensureMapLoaded}
+              />
+
               {isAdmin && (
                 <AdminSection
                   adminTab={adminTab}
@@ -1341,7 +1493,7 @@ export default function Home() {
                   calendar={
                     <CalendarSection
                       title="All calendars"
-                      no="04"
+                      no="05"
                       tasks={
                         calFilter === "all"
                           ? tasks
@@ -1352,6 +1504,7 @@ export default function Home() {
                       dayTasks={dayTasks}
                       onToggle={toggleTask}
                       onRemove={removeTask}
+                      onSaveNote={saveTaskNote}
                       showTeacher={true}
                       teacherNameFor={teacherNameFor}
                       teacherColor={teacherColor}
@@ -1531,6 +1684,303 @@ function SectionHead({ no, title, children }) {
   );
 }
 
+function SkillSearch({ skills, selected, onAdd, onRemove }) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const hits = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q || !skills) return [];
+    return skills
+      .filter(
+        (s) =>
+          s.id.toLowerCase().includes(q) ||
+          (s.name || "").toLowerCase().includes(q),
+      )
+      .slice(0, 6);
+  }, [query, skills]);
+  return (
+    <div>
+      <div style={{ position: "relative" }}>
+        <input
+          className="input"
+          placeholder="Type to search a skill, e.g. 2.N or fractions…"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+          }}
+          onBlur={() => setTimeout(() => setOpen(false), 200)}
+        />
+        {open && hits.length > 0 && (
+          <div className="dc-sugg">
+            {hits.map((s) => (
+              <div
+                key={s.id}
+                onMouseDown={() => {
+                  onAdd(s.id);
+                  setQuery("");
+                }}
+              >
+                <span className="dc-sugg-code">{s.id}</span>
+                {s.name}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {selected.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+          {selected.map((code) => (
+            <span key={code} className="dc-chip">
+              <b>{code}</b>
+              <span onClick={() => onRemove(code)}>×</span>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DayClosersSection({
+  students,
+  dcDate,
+  changeDcDate,
+  dayClosers,
+  updateDayCloser,
+  saveDayCloser,
+  dcOpenStudent,
+  setDcOpenStudent,
+  dcSaved,
+  skills,
+  ensureMapLoaded,
+}) {
+  const doneCount = students.filter((s) => dcSaved[s.id]).length;
+  const [openSubs, setOpenSubs] = useState({});
+  function subOpen(studentId, subKey, filled) {
+    const explicit = openSubs[`${studentId}:${subKey}`];
+    return explicit === undefined ? !!filled : explicit;
+  }
+  function toggleSub(studentId, subKey, filled) {
+    const key = `${studentId}:${subKey}`;
+    setOpenSubs((prev) => ({
+      ...prev,
+      [key]: !(prev[key] === undefined ? !!filled : prev[key]),
+    }));
+  }
+  return (
+    <>
+      <SectionHead no="03" title="Day closers">
+        {doneCount} of {students.length} done
+      </SectionHead>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          marginBottom: 18,
+        }}
+      >
+        <button
+          className="dc-nav"
+          type="button"
+          onClick={() => changeDcDate(shiftDateStr(dcDate, -1))}
+        >
+          ‹
+        </button>
+        <span style={{ fontFamily: "var(--display)", fontSize: 18 }}>
+          {prettyDate(dcDate)}
+        </span>
+        <button
+          className="dc-nav"
+          type="button"
+          onClick={() => changeDcDate(shiftDateStr(dcDate, 1))}
+        >
+          ›
+        </button>
+        <input
+          className="input"
+          type="date"
+          style={{ width: 150, marginLeft: "auto" }}
+          value={dcDate}
+          onChange={(e) => e.target.value && changeDcDate(e.target.value)}
+        />
+      </div>
+      {students.length === 0 ? (
+        <div className="panel" style={{ marginBottom: 48 }}>
+          <div
+            className="inner"
+            style={{ textAlign: "center", padding: "28px 20px" }}
+          >
+            <p style={{ color: "var(--muted)", margin: 0, fontSize: 15 }}>
+              Once students are linked to you, their day closers appear here.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div style={{ marginBottom: 48 }}>
+          {students.map((st) => {
+            const isOpen = dcOpenStudent === st.id;
+            const data = dayClosers[st.id] || {};
+            return (
+              <div key={st.id} className="panel" style={{ marginBottom: 14, padding: 0 }}>
+                <div
+                  className="dc-student-head"
+                  onClick={() => {
+                    setDcOpenStudent(isOpen ? null : st.id);
+                    if (!isOpen) ensureMapLoaded();
+                  }}
+                >
+                  <span style={{ fontFamily: "var(--display)", fontSize: 18, flex: 1 }}>
+                    {st.name}
+                  </span>
+                  <span style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--muted)" }}>
+                    {st.code || ""}
+                  </span>
+                  {dcSaved[st.id] ? (
+                    <span className="tag dc-done">✓ done</span>
+                  ) : (
+                    <span className="tag">not filled in yet</span>
+                  )}
+                </div>
+                {isOpen && (
+                  <div style={{ padding: "0 22px 22px" }}>
+                    {DC_SUBJECTS.map((sub) => {
+                      const subData = data[sub.key] || {};
+                      const filled =
+                        DC_QUESTIONS.some((q) => (subData[q.key] || "").trim()) ||
+                        (subData.note || "").trim() ||
+                        (subData.skills || []).length > 0;
+                      const isSubOpen = subOpen(st.id, sub.key, filled);
+                      return (
+                        <div key={sub.key} className="dc-subject">
+                          <div
+                            className="dc-subject-head"
+                            onClick={() => toggleSub(st.id, sub.key, filled)}
+                          >
+                            <span
+                              style={{
+                                display: "inline-block",
+                                width: 8,
+                                height: 8,
+                                borderRadius: "50%",
+                                background: sub.color,
+                                marginRight: 8,
+                              }}
+                            />
+                            {sub.key}
+                            <span style={{ fontSize: 12, color: "var(--faint)", marginLeft: 8 }}>
+                              {filled ? "✓" : "optional"}
+                            </span>
+                            <span style={{ float: "right", color: "var(--faint)", fontSize: 12 }}>
+                              {isSubOpen ? "▾" : "▸"}
+                            </span>
+                          </div>
+                          {isSubOpen && (
+                          <div style={{ padding: "4px 14px 14px" }}>
+                            {DC_QUESTIONS.map((q) => (
+                              <div key={q.key} style={{ marginBottom: 10 }}>
+                                <span className="field-label">{q.label}</span>
+                                <textarea
+                                  className="input"
+                                  rows={2}
+                                  value={subData[q.key] || ""}
+                                  onChange={(e) =>
+                                    updateDayCloser(st.id, (d) => ({
+                                      ...d,
+                                      [sub.key]: { ...(d[sub.key] || {}), [q.key]: e.target.value },
+                                    }))
+                                  }
+                                />
+                              </div>
+                            ))}
+                            <div style={{ marginBottom: 10 }}>
+                              <span className="field-label">Extra note</span>
+                              <textarea
+                                className="input"
+                                rows={2}
+                                value={subData.note || ""}
+                                onChange={(e) =>
+                                  updateDayCloser(st.id, (d) => ({
+                                    ...d,
+                                    [sub.key]: { ...(d[sub.key] || {}), note: e.target.value },
+                                  }))
+                                }
+                              />
+                            </div>
+                            <span className="field-label">Skill codes</span>
+                            <SkillSearch
+                              skills={skills}
+                              selected={subData.skills || []}
+                              onAdd={(code) =>
+                                updateDayCloser(st.id, (d) => {
+                                  const cur = (d[sub.key] || {}).skills || [];
+                                  if (cur.includes(code)) return d;
+                                  return {
+                                    ...d,
+                                    [sub.key]: { ...(d[sub.key] || {}), skills: [...cur, code] },
+                                  };
+                                })
+                              }
+                              onRemove={(code) =>
+                                updateDayCloser(st.id, (d) => ({
+                                  ...d,
+                                  [sub.key]: {
+                                    ...(d[sub.key] || {}),
+                                    skills: ((d[sub.key] || {}).skills || []).filter(
+                                      (c) => c !== code,
+                                    ),
+                                  },
+                                }))
+                              }
+                            />
+                          </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    <div style={{ margin: "14px 0" }}>
+                      <span className="field-label">
+                        Extra notes (anything else about today)
+                      </span>
+                      <textarea
+                        className="input"
+                        rows={2}
+                        value={data.extra || ""}
+                        onChange={(e) =>
+                          updateDayCloser(st.id, (d) => ({ ...d, extra: e.target.value }))
+                        }
+                      />
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+                      <button
+                        className="primary-button"
+                        type="button"
+                        onClick={() => saveDayCloser(st.id)}
+                      >
+                        Save day closer
+                      </button>
+                      {dcSaved[st.id] && (
+                        <span style={{ fontSize: 13, color: "var(--teacher)" }}>
+                          ✓ Saved — you can keep editing
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          <p style={{ color: "var(--faint)", fontSize: 13, marginTop: 6 }}>
+            Subjects you didn’t work on can stay empty — only filled fields are
+            saved.
+          </p>
+        </div>
+      )}
+    </>
+  );
+}
+
 function RepeatPicker({ days, setDays, until, setUntil }) {
   const labels = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"];
   return (
@@ -1603,6 +2053,7 @@ function CalendarSection({
   dayTasks,
   onToggle,
   onRemove,
+  onSaveNote,
   showTeacher,
   teacherNameFor,
   teacherColor,
@@ -1611,6 +2062,12 @@ function CalendarSection({
 }) {
   const { year, month, days, lead, label } = currentMonthInfo();
   const today = todayStr();
+  const [noteTask, setNoteTask] = useState(null);
+  const [noteText, setNoteText] = useState("");
+  function openNote(t) {
+    setNoteTask(t);
+    setNoteText(t.notes || "");
+  }
 
   return (
     <div style={{ marginBottom: 48 }}>
@@ -1741,9 +2198,46 @@ function CalendarSection({
               list={dayTasks}
               onToggle={onToggle}
               onRemove={onRemove}
+              onEditNote={onSaveNote ? openNote : null}
               showTeacher={showTeacher}
               teacherNameFor={teacherNameFor}
             />
+          )}
+
+          {noteTask && (
+            <div className="inner" style={{ marginTop: 12 }}>
+              <span className="field-label">
+                Notes — what do you want to work on? ·{" "}
+                {noteTask.student_code ? noteTask.student_code + " · " : ""}
+                {noteTask.title}
+              </span>
+              <textarea
+                className="input"
+                rows={3}
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                placeholder="e.g. focus on x7 table, he almost has it…"
+              />
+              <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={async () => {
+                    const ok = await onSaveNote(noteTask, noteText);
+                    if (ok !== false) setNoteTask(null);
+                  }}
+                >
+                  Save note
+                </button>
+                <button
+                  className="link-button"
+                  type="button"
+                  onClick={() => setNoteTask(null)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
           )}
 
           {form}
@@ -1762,6 +2256,7 @@ function DayTimeline({
   list,
   onToggle,
   onRemove,
+  onEditNote,
   showTeacher,
   teacherNameFor,
 }) {
@@ -1835,9 +2330,33 @@ function DayTimeline({
                 >
                   {t.student_code ? t.student_code + " · " : ""}
                   {t.title}
+                  {t.notes && (
+                    <span
+                      style={{
+                        display: "block",
+                        fontStyle: "italic",
+                        color: "var(--muted)",
+                        fontSize: 12,
+                      }}
+                    >
+                      {t.notes}
+                    </span>
+                  )}
                 </span>
                 {showTeacher && teacherNameFor(t.teacher_id) && (
                   <span className="tag">{teacherNameFor(t.teacher_id)}</span>
+                )}
+                {onEditNote && (
+                  <button
+                    className="link-button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEditNote(t);
+                    }}
+                    title={t.notes ? "Edit note" : "Add note"}
+                  >
+                    ✎
+                  </button>
                 )}
                 <button
                   className="link-button"
@@ -1893,6 +2412,19 @@ function DayTimeline({
                   {String(t.task_time).slice(0, 5)}
                   {t.end_time ? "–" + String(t.end_time).slice(0, 5) : ""}
                 </span>
+                {onEditNote && (
+                  <span
+                    className="de-x"
+                    style={{ right: 20, opacity: t.notes ? 1 : undefined }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEditNote(t);
+                    }}
+                    title={t.notes ? "Edit note" : "Add note"}
+                  >
+                    ✎
+                  </span>
+                )}
                 <span
                   className="de-x"
                   onClick={(e) => {
@@ -1915,6 +2447,20 @@ function DayTimeline({
                   {t.student_code ? t.student_code + " · " : ""}
                   {t.title}
                 </div>
+                {t.notes && height > 52 && (
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontStyle: "italic",
+                      color: "var(--muted)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {t.notes}
+                  </div>
+                )}
                 {showTeacher && teacherNameFor(t.teacher_id) && height > 40 && (
                   <div style={{ fontSize: 10, color: "var(--muted)" }}>
                     {teacherNameFor(t.teacher_id)}
@@ -1951,7 +2497,7 @@ function AdminSection({
   return (
     <div style={{ marginTop: 8 }}>
       <SectionHead
-        no="03"
+        no="04"
         title={adminTab === "students" ? "All students" : "Teachers"}
       >
         Admin ·{" "}
