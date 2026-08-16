@@ -653,7 +653,7 @@ export default function Home() {
     const { data: taskRows } = await supabase
       .from("teacher_tasks")
       .select(
-        "id, teacher_id, title, due_date, task_time, end_time, category, student_code, done",
+        "id, teacher_id, title, due_date, task_time, end_time, category, student_code, done, notes",
       )
       .order("due_date");
     setTasks(taskRows || []);
@@ -1035,6 +1035,28 @@ export default function Home() {
     setTasks(tasks.filter((t) => t.id !== task.id));
   }
 
+  async function saveTaskNote(task, notes) {
+    const clean = (notes || "").trim() || null;
+    if (demo) {
+      setTasks(
+        tasks.map((t) => (t.id === task.id ? { ...t, notes: clean } : t)),
+      );
+      return true;
+    }
+    const { error } = await supabase
+      .from("teacher_tasks")
+      .update({ notes: clean })
+      .eq("id", task.id);
+    if (error) {
+      setErrorMessage(error.message);
+      return false;
+    }
+    setTasks(
+      tasks.map((t) => (t.id === task.id ? { ...t, notes: clean } : t)),
+    );
+    return true;
+  }
+
   // ---- Admin ----
   async function assignTeacher(studentId, teacherId) {
     const { error } = await supabase
@@ -1354,6 +1376,7 @@ export default function Home() {
                 dayTasks={dayTasks}
                 onToggle={toggleTask}
                 onRemove={removeTask}
+                onSaveNote={saveTaskNote}
                 showTeacher={false}
                 teacherNameFor={teacherNameFor}
                 teacherColor={teacherColor}
@@ -1470,7 +1493,7 @@ export default function Home() {
                   calendar={
                     <CalendarSection
                       title="All calendars"
-                      no="04"
+                      no="05"
                       tasks={
                         calFilter === "all"
                           ? tasks
@@ -1481,6 +1504,7 @@ export default function Home() {
                       dayTasks={dayTasks}
                       onToggle={toggleTask}
                       onRemove={removeTask}
+                      onSaveNote={saveTaskNote}
                       showTeacher={true}
                       teacherNameFor={teacherNameFor}
                       teacherColor={teacherColor}
@@ -2029,6 +2053,7 @@ function CalendarSection({
   dayTasks,
   onToggle,
   onRemove,
+  onSaveNote,
   showTeacher,
   teacherNameFor,
   teacherColor,
@@ -2037,6 +2062,12 @@ function CalendarSection({
 }) {
   const { year, month, days, lead, label } = currentMonthInfo();
   const today = todayStr();
+  const [noteTask, setNoteTask] = useState(null);
+  const [noteText, setNoteText] = useState("");
+  function openNote(t) {
+    setNoteTask(t);
+    setNoteText(t.notes || "");
+  }
 
   return (
     <div style={{ marginBottom: 48 }}>
@@ -2167,9 +2198,46 @@ function CalendarSection({
               list={dayTasks}
               onToggle={onToggle}
               onRemove={onRemove}
+              onEditNote={onSaveNote ? openNote : null}
               showTeacher={showTeacher}
               teacherNameFor={teacherNameFor}
             />
+          )}
+
+          {noteTask && (
+            <div className="inner" style={{ marginTop: 12 }}>
+              <span className="field-label">
+                Notes — what do you want to work on? ·{" "}
+                {noteTask.student_code ? noteTask.student_code + " · " : ""}
+                {noteTask.title}
+              </span>
+              <textarea
+                className="input"
+                rows={3}
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                placeholder="e.g. focus on x7 table, he almost has it…"
+              />
+              <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
+                <button
+                  className="primary-button"
+                  type="button"
+                  onClick={async () => {
+                    const ok = await onSaveNote(noteTask, noteText);
+                    if (ok !== false) setNoteTask(null);
+                  }}
+                >
+                  Save note
+                </button>
+                <button
+                  className="link-button"
+                  type="button"
+                  onClick={() => setNoteTask(null)}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
           )}
 
           {form}
@@ -2188,6 +2256,7 @@ function DayTimeline({
   list,
   onToggle,
   onRemove,
+  onEditNote,
   showTeacher,
   teacherNameFor,
 }) {
@@ -2261,9 +2330,33 @@ function DayTimeline({
                 >
                   {t.student_code ? t.student_code + " · " : ""}
                   {t.title}
+                  {t.notes && (
+                    <span
+                      style={{
+                        display: "block",
+                        fontStyle: "italic",
+                        color: "var(--muted)",
+                        fontSize: 12,
+                      }}
+                    >
+                      {t.notes}
+                    </span>
+                  )}
                 </span>
                 {showTeacher && teacherNameFor(t.teacher_id) && (
                   <span className="tag">{teacherNameFor(t.teacher_id)}</span>
+                )}
+                {onEditNote && (
+                  <button
+                    className="link-button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEditNote(t);
+                    }}
+                    title={t.notes ? "Edit note" : "Add note"}
+                  >
+                    ✎
+                  </button>
                 )}
                 <button
                   className="link-button"
@@ -2319,6 +2412,19 @@ function DayTimeline({
                   {String(t.task_time).slice(0, 5)}
                   {t.end_time ? "–" + String(t.end_time).slice(0, 5) : ""}
                 </span>
+                {onEditNote && (
+                  <span
+                    className="de-x"
+                    style={{ right: 20, opacity: t.notes ? 1 : undefined }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onEditNote(t);
+                    }}
+                    title={t.notes ? "Edit note" : "Add note"}
+                  >
+                    ✎
+                  </span>
+                )}
                 <span
                   className="de-x"
                   onClick={(e) => {
@@ -2341,6 +2447,20 @@ function DayTimeline({
                   {t.student_code ? t.student_code + " · " : ""}
                   {t.title}
                 </div>
+                {t.notes && height > 52 && (
+                  <div
+                    style={{
+                      fontSize: 10,
+                      fontStyle: "italic",
+                      color: "var(--muted)",
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {t.notes}
+                  </div>
+                )}
                 {showTeacher && teacherNameFor(t.teacher_id) && height > 40 && (
                   <div style={{ fontSize: 10, color: "var(--muted)" }}>
                     {teacherNameFor(t.teacher_id)}
