@@ -21,13 +21,13 @@ const PASS_GRADE = 7;
 const houseStyle = `
   :root{
     --paper:#F3F0E7; --panel:#EBE6D8; --card:#EDE9DD; --card-white:#FCFBF8;
-    --ink:#2C2A26; --muted:#6B6760; --faint:#9A958A; --rule:rgba(44,42,38,0.14);
-    --rust:#B5552D;
-    --student:#C2663C; --student-soft:#FAF0E8;
-    --teacher:#6E8E5B; --teacher-soft:#EEF3E8;
-    --parent:#5E7E9B;  --parent-soft:#EAF0F4;
+    --ink:#2a2820; --muted:#5e5a50; --faint:#918d82; --rule:#d8d4c8;
+    --rust:#b5552d; --rust-hover:#8c4122;
+    --student:#b5552d; --student-soft:#f5e2d8;
+    --teacher:#c4913a; --teacher-deep:#7d5c1d; --teacher-soft:#f5e8cc;
+    --parent:#6e8e5b;  --parent-soft:#eaf1e6;
     --admin:#8C8678;   --admin-soft:#EFECE3;
-    --display:"Fraunces",Georgia,serif;
+    --display:"DM Serif Display",Georgia,serif;
     --sans:"Inter","Hanken Grotesk",system-ui,sans-serif;
     --mono:"JetBrains Mono",ui-monospace,Consolas,monospace;
   }
@@ -46,8 +46,8 @@ const houseStyle = `
   .role-card.clickable:hover{background:var(--card-white);}
   .panel{background:var(--panel);border-radius:14px;padding:24px;}
   .panel .inner{background:var(--card-white);border:1px solid var(--rule);border-radius:8px;padding:14px 16px;}
-  .primary-button{font-family:var(--sans);font-size:14px;font-weight:500;background:var(--ink);color:var(--paper);border:none;border-radius:6px;padding:11px 20px;cursor:pointer;}
-  .primary-button:hover{opacity:.9;}
+  .primary-button{font-family:var(--sans);font-size:14px;font-weight:500;background:var(--rust);color:#fff;border:none;border-radius:999px;padding:11px 22px;cursor:pointer;}
+  .primary-button:hover{background:var(--rust-hover);}
   .primary-button:disabled{opacity:.4;cursor:default;}
   .link-button{background:none;border:none;font-family:var(--sans);font-size:13px;color:var(--muted);cursor:pointer;padding:0;text-decoration:underline;text-underline-offset:3px;}
   .link-button:hover{color:var(--ink);}
@@ -61,16 +61,16 @@ const houseStyle = `
   .dc-nav:hover{color:var(--ink);}
   .dc-student-head{display:flex;align-items:center;gap:12px;padding:16px 22px;cursor:pointer;border-radius:14px;}
   .dc-student-head:hover{background:rgba(255,255,255,.35);}
-  .tag.dc-done{background:var(--teacher-soft);color:var(--teacher);}
+  .tag.dc-done{background:var(--teacher-soft);color:var(--teacher-deep);}
   .dc-subject{background:var(--card-white);border:1px solid var(--rule);border-radius:8px;margin-bottom:12px;}
   .dc-subject-head{padding:11px 14px;cursor:pointer;font-weight:500;font-size:14px;}
   .dc-subject-head:hover{background:var(--card);border-radius:8px;}
   .dc-sugg{position:absolute;left:0;right:0;top:100%;background:var(--card-white);border:1px solid var(--rule);border-radius:6px;box-shadow:0 6px 18px rgba(44,42,38,.12);z-index:5;max-height:180px;overflow:auto;}
   .dc-sugg div{padding:7px 10px;font-size:13px;cursor:pointer;}
   .dc-sugg div:hover{background:var(--teacher-soft);}
-  .dc-sugg-code{font-family:var(--mono);font-size:12px;color:var(--teacher);margin-right:8px;}
+  .dc-sugg-code{font-family:var(--mono);font-size:12px;color:var(--teacher-deep);margin-right:8px;}
   .dc-chip{font-family:var(--mono);font-size:12px;background:var(--teacher-soft);color:var(--ink);border:1px solid var(--rule);border-radius:6px;padding:3px 8px;display:inline-flex;align-items:center;gap:6px;}
-  .dc-chip b{color:var(--teacher);font-weight:500;}
+  .dc-chip b{color:var(--teacher-deep);font-weight:500;}
   .dc-chip span{cursor:pointer;color:var(--faint);}
   .cal{background:var(--card-white);border:1px solid var(--rule);border-radius:10px;overflow:hidden;}
   .cal-head{display:grid;grid-template-columns:repeat(7,1fr);background:var(--card);}
@@ -102,8 +102,8 @@ const houseStyle = `
 `;
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-const TEACHER_COLORS = ["#6E8E5B", "#5E7E9B", "#C2663C", "#8C8678"];
-const TEACHER_SOFTS = ["#EEF3E8", "#EAF0F4", "#FAF0E8", "#EFECE3"];
+const TEACHER_COLORS = ["#6e8e5b", "#c4913a", "#b5552d", "#8c8678"];
+const TEACHER_SOFTS = ["#eaf1e6", "#f5e8cc", "#f5e2d8", "#efece3"];
 
 // Agenda-categorieën met vaste kleuren (besluit JW 08-08-2026).
 const CATEGORIES = [
@@ -149,10 +149,10 @@ function prettyDate(dateStr) {
 }
 
 const DC_SUBJECTS = [
-  { key: "Math", color: "#C2663C" },
-  { key: "Literacy", color: "#6E8E5B" },
-  { key: "Science", color: "#5E7E9B" },
-  { key: "Project", color: "#D66BA0" },
+  { key: "Math", color: "#b5552d" },
+  { key: "Literacy", color: "#6e8e5b" },
+  { key: "Science", color: "#c4913a" },
+  { key: "Project", color: "#4f6842" },
 ];
 const DC_QUESTIONS = [
   { key: "well", label: "What went well?" },
@@ -246,6 +246,8 @@ const DEMO_STUDENTS = [
     archived: false,
   },
 ];
+
+const LOGO_SRC = "data:image/png;base64,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";
 
 const DEMO_SKILLS = [
   // Mathematics
@@ -1173,7 +1175,7 @@ export default function Home() {
         <title>Lychee Learningpath</title>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link
-          href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;1,9..144,400;1,9..144,500&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+          href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
           rel="stylesheet"
         />
         <style>{houseStyle}</style>
@@ -1190,14 +1192,10 @@ export default function Home() {
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <span
-                style={{
-                  width: 14,
-                  height: 14,
-                  borderRadius: "50%",
-                  background: "linear-gradient(135deg, #6E8E5B, #B5552D)",
-                  display: "inline-block",
-                }}
+              <img
+                src={LOGO_SRC}
+                alt="Lychee Learning"
+                style={{ width: 26, height: 26, display: "inline-block" }}
               />
               <span style={{ fontFamily: "var(--display)", fontSize: 18 }}>
                 Lychee Learning
@@ -1961,7 +1959,7 @@ function DayClosersSection({
                         Save day closer
                       </button>
                       {dcSaved[st.id] && (
-                        <span style={{ fontSize: 13, color: "var(--teacher)" }}>
+                        <span style={{ fontSize: 13, color: "var(--teacher-deep)" }}>
                           ✓ Saved — you can keep editing
                         </span>
                       )}
