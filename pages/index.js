@@ -16,7 +16,7 @@ import { supabase } from "../lib/supabaseClient";
 // Alle beveiliging zit in RLS in de database; de app filtert alleen voor de
 // duidelijkheid.
 
-const PASS_GRADE = 5;
+const PASS_GRADE = 7;
 
 const houseStyle = `
   :root{
